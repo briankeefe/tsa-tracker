@@ -18,21 +18,30 @@ import logging
 import aiosqlite
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from beautifulsoup4 import BeautifulSoup
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
-from prometheus_client import Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Gauge, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry, REGISTRY
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.getenv("DATA_DIR", "."), "tsa_wait_times.db")
 
+# Clear any existing metrics to prevent duplicates
+try:
+    REGISTRY.unregister(tsa_wait_minutes)
+except:
+    pass
+
+# Create new metrics registry to avoid conflicts
+metrics_registry = CollectorRegistry()
 tsa_wait_minutes = Gauge(
     'tsa_wait_minutes', 
     'Current TSA wait time in minutes',
-    ['airport', 'terminal', 'lane']
+    ['airport', 'terminal', 'lane'],
+    registry=metrics_registry
 )
 
 scheduler = AsyncIOScheduler()
@@ -109,32 +118,57 @@ async def scrape_ewr():
         logger.error(f"Error scraping EWR: {e}")
 
 
+async def scrape_atl():
+    """Scrape ATL (Atlanta) wait times from atl.com/times/."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get("https://www.atl.com/times/")
+            response.raise_for_status()
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # ATL shows wait times in a specific format with checkpoints
+        checkpoints = {
+            "MAIN": ("A", "general"),
+            "NORTH": ("B", "general"), 
+            "LOWER NORTH": ("C", "general"),
+            "SOUTH": ("D", "precheck"),  # PreCheck only checkpoint
+            "INTERNATIONAL MAIN": ("INTL", "general")
+        }
+        
+        for checkpoint_name, (terminal, lane) in checkpoints.items():
+            # Look for the checkpoint section and extract wait time
+            checkpoint_section = soup.find(text=lambda t: t and checkpoint_name in t.upper())
+            if checkpoint_section:
+                # Find the wait time number in nearby elements
+                parent = checkpoint_section.parent
+                if parent:
+                    # Look for numeric values near the checkpoint name
+                    wait_element = parent.find_next(text=lambda t: t and t.strip().isdigit())
+                    if wait_element:
+                        wait_minutes = int(wait_element.strip())
+                        await store_wait_time("ATL", terminal, lane, wait_minutes)
+                        
+    except Exception as e:
+        logger.error(f"Error scraping ATL: {e}")
+
+
 async def scrape_other_airports():
-    """Check and scrape other airports if they have live wait time pages."""
-    # TODO: Research and implement scrapers for JFK, LGA, BOS, ATL
-    # For now, this is a placeholder
-    airports_to_check = [
-        ("JFK", "https://www.jfkairport.com/"),
-        ("LGA", "https://www.laguardiaairport.com/"), 
-        ("BOS", "https://www.massport.com/logan-airport/"),
-        ("ATL", "https://www.atl.com/")
-    ]
+    """Note: JFK and LGA require headless browser due to JavaScript-loaded data.
     
-    for airport_code, url in airports_to_check:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                
-                text = response.text.lower()
-                if any(keyword in text for keyword in ["wait time", "security wait", "tsa", "checkpoint"]):
-                    logger.info(f"{airport_code}: Found potential wait time data at {url}")
-                    # TODO: Implement specific parsing logic for each airport
-                else:
-                    logger.info(f"{airport_code}: No wait time data found at {url}")
-                    
-        except Exception as e:
-            logger.warning(f"Error checking {airport_code}: {e}")
+    Research findings:
+    - JFK: Available via same Port Authority API as EWR, but needs headless browser
+    - LGA: Available via Port Authority API, needs headless browser  
+    - BOS: No official live data available (only third-party estimates)
+    - ATL: Available via HTML scraping from atl.com/times/
+    """
+    # For now, only implement ATL which can be scraped with simple HTTP
+    await scrape_atl()
+    
+    # Log status of other airports
+    logger.info("JFK: Available but requires headless browser (JavaScript SPA)")
+    logger.info("LGA: Available but requires headless browser (Vue.js SPA)")
+    logger.info("BOS: No official live data - only third-party crowdsourced estimates")
 
 
 async def run_scraper():
@@ -461,7 +495,7 @@ async def api_trends(airport: str, terminal: str, lane: str):
 @app.get("/metrics", response_class=PlainTextResponse)
 async def prometheus_metrics():
     """Prometheus metrics endpoint."""
-    return generate_latest()
+    return generate_latest(metrics_registry)
 
 
 @app.get("/health")
@@ -472,4 +506,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=5100, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=5100, reload=False)
