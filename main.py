@@ -8,8 +8,6 @@ stores them in SQLite, and provides REST API + Prometheus metrics endpoints.
 
 import asyncio
 import os
-import re
-import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
@@ -19,30 +17,30 @@ import aiosqlite
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
-from fastapi.templating import Jinja2Templates
-from prometheus_client import Gauge, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry, REGISTRY
+from prometheus_client import Gauge, generate_latest
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.getenv("DATA_DIR", "."), "tsa_wait_times.db")
 
-# Clear any existing metrics to prevent duplicates
-try:
-    REGISTRY.unregister(tsa_wait_minutes)
-except:
-    pass
-
-# Create new metrics registry to avoid conflicts
-metrics_registry = CollectorRegistry()
+# Prometheus metrics — use default REGISTRY to avoid duplicate timeseries bug
 tsa_wait_minutes = Gauge(
-    'tsa_wait_minutes', 
+    'tsa_wait_minutes',
     'Current TSA wait time in minutes',
     ['airport', 'terminal', 'lane'],
-    registry=metrics_registry
 )
+
+PA_API_BASE = "https://avi-prod-mpp-webapp-api.azurewebsites.net/api/v1/SecurityWaitTimesPoints"
+PA_HEADERS = {
+    "Referer": "https://www.jfkairport.com/",
+    "User-Agent": "Mozilla/5.0 (compatible; TSATracker/1.0)",
+}
+
+BROWSERLESS_URL = os.getenv("BROWSERLESS_URL", "http://localhost:3100")
+BROWSERLESS_TOKEN = os.getenv("BROWSERLESS_TOKEN", "poseidon-scraper-token")
 
 scheduler = AsyncIOScheduler()
 
@@ -81,101 +79,129 @@ async def store_wait_time(airport: str, terminal: str, lane: str, wait_minutes: 
         await db.commit()
         
     tsa_wait_minutes.labels(airport=airport, terminal=terminal, lane=lane).set(wait_minutes)
-    logger.info(f"Stored: {airport} {terminal} {lane} = {wait_minutes}min")
+    logger.debug(f"Stored: {airport} {terminal} {lane} = {wait_minutes}min")
 
 
-async def scrape_ewr():
-    """Scrape EWR (Newark) wait times from newarkairport.com."""
+async def scrape_port_authority(airport_code: str):
+    """Scrape wait times from Port Authority JSON API (EWR/JFK/LGA)."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get("https://www.newarkairport.com/")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{PA_API_BASE}/{airport_code}",
+                headers=PA_HEADERS,
+            )
             response.raise_for_status()
-            
-        text = re.sub(r"\s+", " ", response.text)
-        
-        # Parse terminal wait times using regex patterns
-        # Example: "Terminal A Terminal A Gates All Gates General Line 15 min TSA Pre✓ Line 7 min"
-        terminals = ["A", "B", "C"]
-        
-        for terminal in terminals:
-            terminal_pattern = f"Terminal {terminal}.*?(?=Terminal [ABC]|$)"
-            terminal_match = re.search(terminal_pattern, text, re.IGNORECASE | re.DOTALL)
-            
-            if terminal_match:
-                terminal_text = terminal_match.group(0)
-                
-                general_match = re.search(r"General Line (\d+) min", terminal_text, re.IGNORECASE)
-                if general_match:
-                    general_wait = int(general_match.group(1))
-                    await store_wait_time("EWR", terminal, "general", general_wait)
-                
-                precheck_match = re.search(r"TSA Pre[✓✔] Line (\d+) min", terminal_text, re.IGNORECASE)
-                if precheck_match:
-                    precheck_wait = int(precheck_match.group(1))
-                    await store_wait_time("EWR", terminal, "precheck", precheck_wait)
-                    
+
+        data = response.json()
+        count = 0
+
+        for point in data:
+            if not point.get("queueOpen"):
+                continue
+
+            terminal = point.get("terminal", "")
+            gate = point.get("gate", "All Gates")
+            queue_type = point.get("queueType", "")
+
+            if queue_type == "Reg":
+                lane = "general"
+            elif queue_type == "TSAPre":
+                lane = "precheck"
+            else:
+                continue
+
+            if gate and gate != "All Gates":
+                terminal_id = f"{terminal}/{gate}"
+            else:
+                terminal_id = terminal
+
+            if point.get("isWaitTimeAvailable"):
+                wait_minutes = point.get("timeInMinutes", 0)
+            else:
+                wait_minutes = 0
+
+            await store_wait_time(airport_code, terminal_id, lane, wait_minutes)
+            count += 1
+
+        logger.info(f"{airport_code}: stored {count} wait time records")
+
     except Exception as e:
-        logger.error(f"Error scraping EWR: {e}")
+        logger.error(f"Error scraping {airport_code}: {e}")
 
 
 async def scrape_atl():
-    """Scrape ATL (Atlanta) wait times from atl.com/times/."""
+    """Scrape ATL wait times via browserless (needed to bypass Cloudflare)."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get("https://www.atl.com/times/")
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post(
+                f"{BROWSERLESS_URL}/content",
+                params={"token": BROWSERLESS_TOKEN},
+                headers={"Content-Type": "application/json"},
+                json={
+                    "url": "https://www.atl.com/times/",
+                    "gotoOptions": {
+                        "waitUntil": "networkidle2",
+                        "timeout": 25000,
+                    },
+                    "bestAttempt": True,
+                },
+            )
             response.raise_for_status()
-            
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # ATL shows wait times in a specific format with checkpoints
-        checkpoints = {
-            "MAIN": ("A", "general"),
-            "NORTH": ("B", "general"), 
-            "LOWER NORTH": ("C", "general"),
-            "SOUTH": ("D", "precheck"),  # PreCheck only checkpoint
-            "INTERNATIONAL MAIN": ("INTL", "general")
-        }
-        
-        for checkpoint_name, (terminal, lane) in checkpoints.items():
-            # Look for the checkpoint section and extract wait time
-            checkpoint_section = soup.find(text=lambda t: t and checkpoint_name in t.upper())
-            if checkpoint_section:
-                # Find the wait time number in nearby elements
-                parent = checkpoint_section.parent
-                if parent:
-                    # Look for numeric values near the checkpoint name
-                    wait_element = parent.find_next(text=lambda t: t and t.strip().isdigit())
-                    if wait_element:
-                        wait_minutes = int(wait_element.strip())
-                        await store_wait_time("ATL", terminal, lane, wait_minutes)
-                        
+
+        html = response.text
+
+        if "Just a moment" in html[:1000] or "challenge-platform" in html[:2000]:
+            logger.warning("ATL: Cloudflare challenge not bypassed, skipping")
+            return
+
+        soup = BeautifulSoup(html, "html.parser")
+        count = 0
+
+        for section_selector, section_name in [
+            ("div.col-lg-4.nesclasser2", "Domestic"),
+            ("div.col-lg-5.nesclasser1", "International"),
+        ]:
+            section = soup.select_one(section_selector)
+            if not section:
+                continue
+
+            for row in section.select("div.row"):
+                h2 = row.select_one("h2")
+                h3 = row.select_one("h3")
+                span = row.select_one("div.declasser3 button span")
+
+                if not h2 or not span:
+                    continue
+
+                if h3 and "CLOSED" in h3.get_text():
+                    continue
+
+                checkpoint = h2.get_text(strip=True)
+                wait_val = span.get_text(strip=True)
+
+                if wait_val == "X" or not wait_val.isdigit():
+                    continue
+
+                terminal = f"{section_name}/{checkpoint}"
+                await store_wait_time("ATL", terminal, "general", int(wait_val))
+                count += 1
+
+        logger.info(f"ATL: stored {count} wait time records")
+
+    except httpx.ConnectError:
+        logger.warning("ATL: browserless not reachable, skipping")
     except Exception as e:
         logger.error(f"Error scraping ATL: {e}")
 
 
-async def scrape_other_airports():
-    """Note: JFK and LGA require headless browser due to JavaScript-loaded data.
-    
-    Research findings:
-    - JFK: Available via same Port Authority API as EWR, but needs headless browser
-    - LGA: Available via Port Authority API, needs headless browser  
-    - BOS: No official live data available (only third-party estimates)
-    - ATL: Available via HTML scraping from atl.com/times/
-    """
-    # For now, only implement ATL which can be scraped with simple HTTP
-    await scrape_atl()
-    
-    # Log status of other airports
-    logger.info("JFK: Available but requires headless browser (JavaScript SPA)")
-    logger.info("LGA: Available but requires headless browser (Vue.js SPA)")
-    logger.info("BOS: No official live data - only third-party crowdsourced estimates")
-
-
 async def run_scraper():
-    """Run all scrapers."""
     logger.info("Starting scraper run")
-    await scrape_ewr()
-    await scrape_other_airports()
+    await asyncio.gather(
+        scrape_port_authority("EWR"),
+        scrape_port_authority("JFK"),
+        scrape_port_authority("LGA"),
+        scrape_atl(),
+    )
     logger.info("Scraper run completed")
 
 
@@ -298,12 +324,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-templates = Jinja2Templates(directory=".")
-
-
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    """Home page showing current wait times in a table."""
+async def home():
     current_times = await get_current_wait_times()
     
     grouped_data = {}
@@ -494,8 +516,7 @@ async def api_trends(airport: str, terminal: str, lane: str):
 
 @app.get("/metrics", response_class=PlainTextResponse)
 async def prometheus_metrics():
-    """Prometheus metrics endpoint."""
-    return generate_latest(metrics_registry)
+    return generate_latest()
 
 
 @app.get("/health")
@@ -506,4 +527,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=5100, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=5100)
