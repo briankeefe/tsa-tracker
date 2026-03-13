@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  tsa-tracker:
+    build: .
+    ports:
+      - "5100:5100"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONPATH=/app
+      - DATA_DIR=/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
