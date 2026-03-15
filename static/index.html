@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TSA Wait Times → Live Security Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-primary: oklch(0.12 0.01 240);
+            --bg-secondary: oklch(0.16 0.02 240);
+            --bg-elevated: oklch(0.20 0.03 240);
+            --text-primary: oklch(0.95 0.01 240);
+            --text-secondary: oklch(0.70 0.02 240);
+            --text-muted: oklch(0.50 0.02 240);
+            --accent-green: oklch(0.65 0.15 145);
+            --accent-amber: oklch(0.70 0.12 85);
+            --accent-red: oklch(0.60 0.15 25);
+            --accent-blue: oklch(0.65 0.12 240);
+            --border-subtle: oklch(0.25 0.02 240);
+            --shadow-lg: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+            --shadow-xl: 0 35px 60px -12px rgba(0, 0, 0, 0.9);
+            --gradient-mesh: radial-gradient(ellipse at top, oklch(0.20 0.05 240) 0%, transparent 60%),
+                             radial-gradient(ellipse at bottom right, oklch(0.18 0.04 200) 0%, transparent 50%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            background: var(--bg-primary);
+            background-image: var(--gradient-mesh);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .noise-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.03;
+            background-image: 
+                radial-gradient(circle at 20% 50%, white 1px, transparent 1px),
+                radial-gradient(circle at 70% 20%, white 1px, transparent 1px),
+                radial-gradient(circle at 90% 80%, white 1px, transparent 1px);
+            background-size: 100px 100px, 150px 150px, 200px 200px;
+            animation: noise-drift 60s linear infinite;
+        }
+
+        @keyframes noise-drift {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(-100px, -100px); }
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            animation: fade-in-up 0.8s ease-out;
+        }
+
+        .title {
+            font-size: clamp(2.5rem, 8vw, 6rem);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-blue) 100%);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            line-height: 0.9;
+        }
+
+        .subtitle {
+            font-size: clamp(1rem, 3vw, 1.5rem);
+            color: var(--text-secondary);
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 1000px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            backdrop-filter: blur(10px);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.2); }
+        }
+
+        .airports-grid {
+            display: grid;
+            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            animation: fade-in 1s ease-out 0.3s both;
+        }
+
+        .airport-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: blur(20px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .airport-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+        }
+
+        .airport-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-xl);
+            border-color: var(--accent-blue);
+        }
+
+        .airport-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .airport-name {
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .last-updated {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .terminals {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .terminal-row {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 1rem;
+            align-items: center;
+            padding: 1rem;
+            background: var(--bg-elevated);
+            border-radius: 12px;
+            border: 1px solid var(--border-subtle);
+            transition: all 0.2s ease;
+        }
+
+        .terminal-row:hover {
+            background: var(--bg-primary);
+            border-color: var(--accent-blue);
+        }
+
+        .terminal-name {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .wait-indicator {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.25rem;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            text-align: center;
+            min-width: 80px;
+            font-feature-settings: 'tnum' 1;
+            letter-spacing: 0.02em;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .wait-indicator.general {
+            background: oklch(0.25 0.05 240);
+            color: var(--text-primary);
+            border-color: var(--border-subtle);
+        }
+
+        .wait-indicator.precheck {
+            background: oklch(0.22 0.08 145);
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        .wait-indicator.low {
+            background: oklch(0.22 0.08 145);
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        .wait-indicator.medium {
+            background: oklch(0.25 0.08 85);
+            color: var(--accent-amber);
+            border-color: var(--accent-amber);
+        }
+
+        .wait-indicator.high {
+            background: oklch(0.22 0.08 25);
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+        }
+
+        .wait-indicator.no-data {
+            background: var(--bg-primary);
+            color: var(--text-muted);
+            border-color: var(--border-subtle);
+        }
+
+        .lane-labels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        .no-data-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+            animation: fade-in 0.6s ease-out;
+        }
+
+        .no-data-state .icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .footer {
+            margin-top: 4rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            animation: fade-in 1s ease-out 0.6s both;
+        }
+
+        .footer a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s ease;
+        }
+
+        .footer a:hover {
+            border-color: var(--accent-blue);
+        }
+
+        @keyframes fade-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes fade-in-up {
+            from { 
+                opacity: 0; 
+                transform: translateY(20px);
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .airports-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .airport-card {
+                padding: 1.5rem;
+            }
+            
+            .terminal-row {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+                text-align: center;
+            }
+            
+            .lane-labels {
+                justify-content: center;
+                gap: 1rem;
+            }
+        }
+
+        /* Auto-refresh indicator animation */
+        .refresh-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--accent-blue);
+            transform-origin: left;
+            animation: refresh-countdown 60s linear infinite;
+        }
+
+        @keyframes refresh-countdown {
+            from { transform: scaleX(1); }
+            to { transform: scaleX(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="noise-overlay"></div>
+    <div class="refresh-progress"></div>
+    
+    <div class="container">
+        <header>
+            <h1 class="title">TSA Security Wait Times</h1>
+            <p class="subtitle">Live Airport Security Tracking</p>
+            <div class="live-indicator">
+                <div class="pulse-dot"></div>
+                <span id="live-status">Updates every 60 seconds</span>
+            </div>
+        </header>
+
+        <main id="airports-container">
+            <!-- Content will be populated by JavaScript -->
+        </main>
+
+        <footer class="footer">
+            <p>
+                Data refreshes automatically every 5 minutes • 
+                <a href="/api/current">JSON API</a> • 
+                <a href="/metrics">Prometheus Metrics</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        let refreshCountdown = 60;
+        let countdownInterval;
+
+        function updateLiveStatus() {
+            const statusEl = document.getElementById('live-status');
+            statusEl.textContent = `Next update in ${refreshCountdown}s`;
+            refreshCountdown--;
+            
+            if (refreshCountdown < 0) {
+                refreshCountdown = 60;
+                loadData();
+            }
+        }
+
+        function getWaitIndicatorClass(minutes, lane) {
+            if (minutes === null || minutes === undefined) {
+                return 'wait-indicator no-data';
+            }
+            
+            let baseClass = 'wait-indicator ';
+            
+            if (lane === 'precheck') {
+                baseClass += 'precheck ';
+            } else {
+                baseClass += 'general ';
+            }
+            
+            if (minutes < 10) {
+                baseClass += 'low';
+            } else if (minutes < 20) {
+                baseClass += 'medium';
+            } else {
+                baseClass += 'high';
+            }
+            
+            return baseClass;
+        }
+
+        function formatWaitTime(minutes) {
+            if (minutes === null || minutes === undefined) {
+                return '—';
+            }
+            return `${minutes}m`;
+        }
+
+        function formatLastUpdated(timestamp) {
+            if (!timestamp) return '—';
+            
+            try {
+                const dt = new Date(timestamp.replace('Z', '+00:00'));
+                return dt.toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: false 
+                });
+            } catch {
+                return '—';
+            }
+        }
+
+        async function loadData() {
+            try {
+                const response = await fetch('/api/current');
+                const data = await response.json();
+                
+                // Group data by airport and terminal
+                const grouped = {};
+                data.forEach(item => {
+                    const airport = item.airport;
+                    const terminal = item.terminal;
+                    const key = `${airport}-${terminal}`;
+                    
+                    if (!grouped[key]) {
+                        grouped[key] = {
+                            airport,
+                            terminal,
+                            general: null,
+                            precheck: null,
+                            last_updated: null
+                        };
+                    }
+                    
+                    if (item.lane === 'general') {
+                        grouped[key].general = item.wait_minutes;
+                    } else if (item.lane === 'precheck') {
+                        grouped[key].precheck = item.wait_minutes;
+                    }
+                    
+                    grouped[key].last_updated = item.scraped_at;
+                });
+                
+                renderAirports(Object.values(grouped));
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                renderError();
+            }
+        }
+
+        function renderAirports(airportsData) {
+            const container = document.getElementById('airports-container');
+            
+            if (!airportsData || airportsData.length === 0) {
+                container.innerHTML = `
+                    <div class="no-data-state">
+                        <div class="icon">🛂</div>
+                        <h2>No wait time data available yet</h2>
+                        <p>Scraping in progress...</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Group by airport
+            const airportGroups = {};
+            airportsData.forEach(item => {
+                if (!airportGroups[item.airport]) {
+                    airportGroups[item.airport] = [];
+                }
+                airportGroups[item.airport].push(item);
+            });
+            
+            container.innerHTML = `
+                <div class="airports-grid">
+                    ${Object.entries(airportGroups).map(([airport, terminals]) => `
+                        <div class="airport-card">
+                            <div class="airport-header">
+                                <h2 class="airport-name">${airport}</h2>
+                                <div class="last-updated">
+                                    ${formatLastUpdated(terminals[0]?.last_updated)}
+                                </div>
+                            </div>
+                            
+                            <div class="terminals">
+                                ${terminals.sort((a, b) => a.terminal.localeCompare(b.terminal)).map(terminal => `
+                                    <div class="terminal-row">
+                                        <div class="terminal-name">${terminal.terminal}</div>
+                                        <div class="${getWaitIndicatorClass(terminal.general, 'general')}">
+                                            ${formatWaitTime(terminal.general)}
+                                        </div>
+                                        <div class="${getWaitIndicatorClass(terminal.precheck, 'precheck')}">
+                                            ${formatWaitTime(terminal.precheck)}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            
+                            <div class="lane-labels">
+                                <div>General Security</div>
+                                <div>TSA PreCheck</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderError() {
+            const container = document.getElementById('airports-container');
+            container.innerHTML = `
+                <div class="no-data-state">
+                    <div class="icon">⚠️</div>
+                    <h2>Unable to load wait times</h2>
+                    <p>Please try again in a moment.</p>
+                </div>
+            `;
+        }
+
+        // Initialize
+        loadData();
+        
+        // Start countdown timer
+        countdownInterval = setInterval(updateLiveStatus, 1000);
+        
+        // Auto-refresh every 60 seconds
+        setInterval(loadData, 60000);
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+            }
+        });
+    </script>
+</body>
+</html>

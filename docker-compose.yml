@@ -19,3 +19,15 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared-config.yml:/etc/cloudflared/config.yml
+      - ./tsa-tracker-tunnel.json:/etc/cloudflared/tsa-tracker.json
+    depends_on:
+      - tsa-tracker
+    networks:
+      - default

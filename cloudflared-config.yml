@@ -1,0 +1,9 @@
+tunnel: f9161b7d-02a3-4d47-b4bd-340c0eb72d13
+credentials-file: /etc/cloudflared/tsa-tracker.json
+
+ingress:
+  - hostname: tsa.briankeefe.dev
+    service: http://172.21.0.2:5100
+  - hostname: ski.briankeefe.dev
+    service: http://172.26.0.2:5300
+  - service: http_status:404

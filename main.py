@@ -19,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import Gauge, generate_latest
 
 logging.basicConfig(level=logging.INFO)
@@ -324,172 +325,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-@app.get("/", response_class=HTMLResponse)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
 async def home():
-    current_times = await get_current_wait_times()
-    
-    grouped_data = {}
-    for item in current_times:
-        airport = item["airport"]
-        terminal = item["terminal"]
-        key = f"{airport}-{terminal}"
-        
-        if key not in grouped_data:
-            grouped_data[key] = {
-                "airport": airport,
-                "terminal": terminal,
-                "general": None,
-                "precheck": None,
-                "last_updated": None
-            }
-            
-        if item["lane"] == "general":
-            grouped_data[key]["general"] = item["wait_minutes"]
-        elif item["lane"] == "precheck":
-            grouped_data[key]["precheck"] = item["wait_minutes"]
-            
-        grouped_data[key]["last_updated"] = item["scraped_at"]
-    
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>TSA Wait Times Tracker</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                max-width: 1200px; 
-                margin: 0 auto; 
-                padding: 20px;
-                background: #f5f5f5;
-            }
-            .container {
-                background: white;
-                padding: 30px;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            h1 { 
-                color: #2c3e50; 
-                text-align: center;
-                margin-bottom: 30px;
-            }
-            table { 
-                width: 100%; 
-                border-collapse: collapse; 
-                margin: 20px 0;
-            }
-            th, td { 
-                border: 1px solid #ddd; 
-                padding: 12px; 
-                text-align: left; 
-            }
-            th { 
-                background: #3498db; 
-                color: white;
-                font-weight: 600;
-            }
-            tr:nth-child(even) { 
-                background: #f8f9fa; 
-            }
-            .wait-time {
-                font-weight: bold;
-                padding: 6px 12px;
-                border-radius: 4px;
-                display: inline-block;
-                min-width: 60px;
-                text-align: center;
-            }
-            .wait-low { background: #d4edda; color: #155724; }
-            .wait-medium { background: #fff3cd; color: #856404; }
-            .wait-high { background: #f8d7da; color: #721c24; }
-            .last-updated { 
-                font-size: 0.9em; 
-                color: #6c757d; 
-            }
-            .no-data { 
-                color: #6c757d; 
-                font-style: italic; 
-            }
-            .refresh-note {
-                text-align: center;
-                margin-top: 20px;
-                font-size: 0.9em;
-                color: #6c757d;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🛂 TSA Wait Times Tracker</h1>
-            
-            <table>
-                <thead>
-                    <tr>
-                        <th>Airport</th>
-                        <th>Terminal</th>
-                        <th>General Security</th>
-                        <th>TSA PreCheck</th>
-                        <th>Last Updated</th>
-                    </tr>
-                </thead>
-                <tbody>
-    """
-    
-    if not grouped_data:
-        html_content += """
-                    <tr>
-                        <td colspan="5" class="no-data">No wait time data available yet. Scraping in progress...</td>
-                    </tr>
-        """
-    else:
-        for data in sorted(grouped_data.values(), key=lambda x: (x["airport"], x["terminal"])):
-            def format_wait_time(minutes):
-                if minutes is None:
-                    return '<span class="no-data">--</span>'
-                
-                css_class = "wait-low"
-                if minutes >= 15:
-                    css_class = "wait-medium" 
-                if minutes >= 30:
-                    css_class = "wait-high"
-                    
-                return f'<span class="wait-time {css_class}">{minutes} min</span>'
-            
-            last_updated = data["last_updated"]
-            if last_updated:
-                dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
-                formatted_time = dt.strftime("%H:%M")
-            else:
-                formatted_time = "--"
-                
-            html_content += f"""
-                    <tr>
-                        <td><strong>{data["airport"]}</strong></td>
-                        <td>{data["terminal"]}</td>
-                        <td>{format_wait_time(data["general"])}</td>
-                        <td>{format_wait_time(data["precheck"])}</td>
-                        <td class="last-updated">{formatted_time}</td>
-                    </tr>
-            """
-    
-    html_content += """
-                </tbody>
-            </table>
-            
-            <div class="refresh-note">
-                Data refreshes automatically every 5 minutes. 
-                <a href="/api/current">View JSON data</a> | 
-                <a href="/metrics">Prometheus metrics</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    return HTMLResponse(content=html_content)
+    with open("static/index.html", "r") as f:
+        return HTMLResponse(content=f.read())
 
 
 @app.get("/api/current")
