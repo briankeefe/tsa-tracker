@@ -154,6 +154,210 @@
             transform: translateY(-1px);
         }
 
+        /* Leave Time Calculator Styles */
+        .calculator-section {
+            max-width: 800px;
+            margin: 2rem auto;
+            animation: fade-in-up 0.8s ease-out 0.4s both;
+        }
+
+        .calculator-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: blur(20px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .calculator-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+        }
+
+        .calculator-title {
+            font-size: clamp(1.5rem, 4vw, 2rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 2rem;
+            text-align: center;
+            letter-spacing: -0.01em;
+        }
+
+        .calculator-form {
+            display: grid;
+            gap: 1.5rem;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .input-group label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 1rem 1.5rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .calculate-btn {
+            grid-column: 1 / -1;
+            padding: 1rem 2rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .calculate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .calculate-btn:active {
+            transform: translateY(0);
+        }
+
+        .calculate-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .calculation-result {
+            margin-top: 2rem;
+            padding: 2rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            animation: fade-in-up 0.4s ease-out;
+        }
+
+        .result-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .leave-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: clamp(2rem, 6vw, 3rem);
+            font-weight: 700;
+            color: var(--accent-green);
+            margin-bottom: 0.5rem;
+        }
+
+        .result-subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .breakdown {
+            border-top: 1px solid var(--border-subtle);
+            padding-top: 2rem;
+        }
+
+        .breakdown-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .breakdown-items {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+
+        .breakdown-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: var(--bg-primary);
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .breakdown-label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .breakdown-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .error-message {
+            color: var(--accent-red);
+            background: rgba(var(--accent-red), 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .calculator-section {
+                margin: 1rem auto;
+                padding: 0 1rem;
+            }
+            
+            .calculator-card {
+                padding: 1.5rem;
+            }
+
+            .calculator-form {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .airports-grid {
             display: grid;
             gap: 2rem;
@@ -409,6 +613,60 @@
             </div>
         </header>
 
+        <!-- Leave Time Calculator -->
+        <div class="calculator-section">
+            <div class="calculator-card">
+                <h2 class="calculator-title">When Should I Leave?</h2>
+                <form id="leave-time-form" class="calculator-form">
+                    <div class="input-group">
+                        <label for="origin-address">Your Address</label>
+                        <input type="text" id="origin-address" class="form-input" placeholder="467 16th St, Brooklyn NY" required>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="airport-select">Airport</label>
+                        <select id="airport-select" class="form-input" required>
+                            <option value="">Select airport...</option>
+                            <option value="EWR">Newark Liberty (EWR)</option>
+                            <option value="JFK">JFK International (JFK)</option>
+                            <option value="LGA">LaGuardia (LGA)</option>
+                            <option value="BOS">Boston Logan (BOS)</option>
+                            <option value="PHL">Philadelphia (PHL)</option>
+                            <option value="PIT">Pittsburgh (PIT)</option>
+                            <option value="CLT">Charlotte Douglas (CLT)</option>
+                            <option value="MIA">Miami International (MIA)</option>
+                            <option value="MCO">Orlando International (MCO)</option>
+                            <option value="DEN">Denver International (DEN)</option>
+                            <option value="ORD">O'Hare International (ORD)</option>
+                            <option value="MDW">Chicago Midway (MDW)</option>
+                            <option value="LAX">Los Angeles International (LAX)</option>
+                            <option value="SFO">San Francisco International (SFO)</option>
+                            <option value="SEA">Seattle-Tacoma (SEA)</option>
+                            <option value="DFW">Dallas/Fort Worth (DFW)</option>
+                            <option value="IAH">Houston Bush (IAH)</option>
+                            <option value="IAD">Washington Dulles (IAD)</option>
+                            <option value="DCA">Reagan National (DCA)</option>
+                            <option value="BWI">Baltimore/Washington (BWI)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="flight-time">Flight Time</label>
+                        <input type="time" id="flight-time" class="form-input" required>
+                    </div>
+                    
+                    <button type="submit" class="calculate-btn">
+                        <span class="btn-text">Calculate</span>
+                        <span class="btn-loading" style="display: none;">Calculating...</span>
+                    </button>
+                </form>
+                
+                <div id="calculation-result" class="calculation-result" style="display: none;">
+                    <!-- Result will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
         <div class="search-container">
             <input type="text" class="search-input" id="airport-search" placeholder="Search airports...">
         </div>
@@ -503,6 +761,128 @@
                     });
                 });
             }
+        }
+
+        // Leave Time Calculator functionality
+        function setupLeaveTimeCalculator() {
+            const form = document.getElementById('leave-time-form');
+            const resultDiv = document.getElementById('calculation-result');
+            
+            if (form) {
+                form.addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    
+                    const origin = document.getElementById('origin-address').value.trim();
+                    const airportCode = document.getElementById('airport-select').value;
+                    const flightTime = document.getElementById('flight-time').value;
+                    
+                    if (!origin || !airportCode || !flightTime) {
+                        showError('Please fill in all fields');
+                        return;
+                    }
+                    
+                    await calculateLeaveTime(origin, airportCode, flightTime);
+                });
+            }
+        }
+
+        async function calculateLeaveTime(origin, airportCode, flightTime) {
+            const btn = document.querySelector('.calculate-btn');
+            const btnText = document.querySelector('.btn-text');
+            const btnLoading = document.querySelector('.btn-loading');
+            const resultDiv = document.getElementById('calculation-result');
+            
+            // Show loading state
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            btnLoading.style.display = 'inline';
+            resultDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/leave-time', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        origin: origin,
+                        airport_code: airportCode,
+                        flight_time: flightTime
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Calculation failed');
+                }
+                
+                displayResult(data);
+                
+            } catch (error) {
+                console.error('Calculation error:', error);
+                showError(error.message || 'Unable to calculate leave time. Please try again.');
+            } finally {
+                // Reset button state
+                btn.disabled = false;
+                btnText.style.display = 'inline';
+                btnLoading.style.display = 'none';
+            }
+        }
+
+        function displayResult(data) {
+            const resultDiv = document.getElementById('calculation-result');
+            
+            resultDiv.innerHTML = `
+                <div class="result-header">
+                    <div class="leave-time">${data.leave_by_display}</div>
+                    <p class="result-subtitle">Leave by ${data.leave_by_display} to catch your flight</p>
+                </div>
+                
+                <div class="breakdown">
+                    <div class="breakdown-title">Time Breakdown</div>
+                    <div class="breakdown-items">
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Drive Time</span>
+                            <span class="breakdown-value">${data.drive_minutes} min</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Security Wait</span>
+                            <span class="breakdown-value">${data.security_minutes} min</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Buffer Time</span>
+                            <span class="breakdown-value">${data.buffer_minutes} min</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Arrive By</span>
+                            <span class="breakdown-value">${data.arrive_by_display}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-subtle); text-align: center;">
+                    <p style="font-size: 0.875rem; color: var(--text-secondary);">
+                        Calculated for <strong>${data.airport}</strong> with current traffic and security data
+                    </p>
+                </div>
+            `;
+            
+            resultDiv.style.display = 'block';
+            
+            resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function showError(message) {
+            const resultDiv = document.getElementById('calculation-result');
+            
+            resultDiv.innerHTML = `
+                <div class="error-message">
+                    <strong>Error:</strong> ${message}
+                </div>
+            `;
+            
+            resultDiv.style.display = 'block';
         }
 
         async function loadData() {
@@ -619,6 +999,7 @@
 
         // Initialize
         loadData();
+        setupLeaveTimeCalculator();
         
         // Start countdown timer
         countdownInterval = setInterval(updateLiveStatus, 1000);

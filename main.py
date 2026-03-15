@@ -12,14 +12,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import logging
+import re
 
 import aiosqlite
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from prometheus_client import Gauge, generate_latest
 
 logging.basicConfig(level=logging.INFO)
@@ -69,7 +71,46 @@ AIRPORT_NAMES = {
     "BWI": "Baltimore/Washington",
 }
 
+AIRPORT_COORDS = {
+    "EWR": (40.6895, -74.1745),
+    "JFK": (40.6413, -73.7781),
+    "LGA": (40.7769, -73.8740),
+    "BOS": (42.3656, -71.0096),
+    "PHL": (39.8744, -75.2424),
+    "PIT": (40.4915, -80.2329),
+    "CLT": (35.2140, -80.9431),
+    "MIA": (25.7959, -80.2870),
+    "MCO": (28.4312, -81.3081),
+    "DEN": (39.8561, -104.6737),
+    "ORD": (41.9742, -87.9073),
+    "MDW": (41.7868, -87.7522),
+    "LAX": (33.9416, -118.4085),
+    "SFO": (37.6213, -122.3790),
+    "SEA": (47.4502, -122.3088),
+    "DFW": (32.8998, -97.0403),
+    "IAH": (29.9902, -95.3368),
+    "IAD": (38.9531, -77.4565),
+    "DCA": (38.8521, -77.0377),
+    "BWI": (39.1754, -76.6682),
+}
+
 scheduler = AsyncIOScheduler()
+
+
+class LeaveTimeRequest(BaseModel):
+    origin: str
+    airport_code: str
+    flight_time: str
+
+
+class LeaveTimeResponse(BaseModel):
+    leave_by: str
+    leave_by_display: str
+    drive_minutes: int
+    security_minutes: int
+    buffer_minutes: int
+    arrive_by_display: str
+    airport: str
 
 
 async def init_database():
@@ -324,6 +365,130 @@ async def get_trend_data(airport: str, terminal: str, lane: str) -> Dict[str, An
     }
 
 
+async def geocode_address(address: str) -> tuple[float, float]:
+    """Geocode address to lat/lon using Nominatim. Returns (lat, lon)."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": address,
+                "format": "json",
+                "limit": 1
+            },
+            headers={
+                "User-Agent": "TSA-Tracker/1.0 (tsa.briankeefe.dev)"
+            }
+        )
+        response.raise_for_status()
+    
+    results = response.json()
+    if not results:
+        raise ValueError(f"Could not find that address: {address}")
+    
+    # Nominatim returns lat/lon as strings
+    return float(results[0]["lat"]), float(results[0]["lon"])
+
+
+async def get_drive_time_minutes(origin_lat: float, origin_lon: float, 
+                                dest_lat: float, dest_lon: float) -> float:
+    """Calculate drive time in minutes using OSRM. Returns minutes as float."""
+    # OSRM coordinate format: lon,lat (longitude first!)
+    coords = f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
+    
+    osrm_servers = [
+        "https://router.project-osrm.org/route/v1/driving",
+        "https://routing.openstreetmap.de/routed-car/route/v1/driving"
+    ]
+    
+    last_error = None
+    for server_url in osrm_servers:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(
+                    f"{server_url}/{coords}",
+                    params={
+                        "overview": "false",
+                        "steps": "false"
+                    }
+                )
+                response.raise_for_status()
+            
+            data = response.json()
+            
+            # Check OSRM response code
+            if data.get("code") != "Ok":
+                raise ValueError(f"OSRM routing error: {data.get('message', data['code'])}")
+            
+            routes = data.get("routes", [])
+            if not routes:
+                raise ValueError("No route found between locations")
+            
+            # Duration is in seconds, convert to minutes
+            return routes[0]["duration"] / 60.0
+            
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            last_error = e
+            logger.warning(f"OSRM server {server_url} failed: {e}")
+            continue
+    
+    raise ValueError(f"All routing services failed. Last error: {last_error}")
+
+
+async def get_airport_security_wait(airport_code: str) -> int:
+    """Get current average security wait time for airport in minutes."""
+    wait_times = await get_current_wait_times()
+    airport_waits = [w for w in wait_times if w['airport'] == airport_code]
+    
+    if not airport_waits:
+        # Default fallbacks if no current data
+        return 20  # 20 min default for general security
+    
+    # Calculate average across all terminals and lanes for the airport
+    total_wait = sum(w['wait_minutes'] for w in airport_waits if w['wait_minutes'] > 0)
+    count = len([w for w in airport_waits if w['wait_minutes'] > 0])
+    
+    if count == 0:
+        return 20  # Default if no valid data
+    
+    return int(total_wait / count)
+
+
+def parse_time_to_minutes(time_str: str) -> int:
+    """Parse time string like '15:45' to minutes since midnight."""
+    if ":" not in time_str:
+        raise ValueError("Time must be in HH:MM format")
+    
+    parts = time_str.split(":")
+    if len(parts) != 2:
+        raise ValueError("Time must be in HH:MM format")
+    
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+    except ValueError:
+        raise ValueError("Time must be in HH:MM format")
+    
+    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+        raise ValueError("Invalid time values")
+    
+    return hours * 60 + minutes
+
+
+def minutes_to_time_string(minutes: int) -> str:
+    """Convert minutes since midnight to HH:MM format."""
+    # Handle negative minutes (previous day)
+    while minutes < 0:
+        minutes += 24 * 60
+    
+    # Handle overflow (next day)
+    while minutes >= 24 * 60:
+        minutes -= 24 * 60
+    
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours:02d}:{mins:02d}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -376,6 +541,90 @@ async def api_history(
 async def api_trends(airport: str, terminal: str, lane: str):
     """REST API endpoint returning trend analysis data."""
     return await get_trend_data(airport, terminal, lane)
+
+
+@app.post("/api/leave-time")
+async def api_leave_time(request: LeaveTimeRequest):
+    """Calculate when to leave for the airport based on drive time + security wait."""
+    try:
+        # Validate airport code
+        if request.airport_code not in AIRPORT_COORDS:
+            raise HTTPException(status_code=400, detail=f"Unsupported airport: {request.airport_code}")
+        
+        # Parse flight time
+        try:
+            flight_minutes = parse_time_to_minutes(request.flight_time)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid flight time: {e}")
+        
+        # Get airport coordinates
+        airport_lat, airport_lon = AIRPORT_COORDS[request.airport_code]
+        
+        # Geocode origin address
+        try:
+            origin_lat, origin_lon = await geocode_address(request.origin)
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Address lookup timed out")
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=502, detail=f"Address lookup failed: HTTP {e.response.status_code}")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        
+        # Get drive time
+        try:
+            drive_minutes = await get_drive_time_minutes(origin_lat, origin_lon, airport_lat, airport_lon)
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Drive time calculation timed out")
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=502, detail=f"Drive time service failed: HTTP {e.response.status_code}")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        
+        # Get current security wait time
+        try:
+            security_minutes = await get_airport_security_wait(request.airport_code)
+        except Exception as e:
+            logger.warning(f"Could not get current wait times for {request.airport_code}: {e}")
+            security_minutes = 20  # Default fallback
+        
+        buffer_minutes = 30
+        recommended_arrive_minutes = 90
+        
+        arrive_at_airport_minutes = flight_minutes - recommended_arrive_minutes
+        leave_minutes = arrive_at_airport_minutes - int(drive_minutes) - security_minutes
+        
+        leave_time_24h = minutes_to_time_string(leave_minutes)
+        arrive_time_24h = minutes_to_time_string(arrive_at_airport_minutes)
+        
+        def to_12_hour_format(time_24h: str) -> str:
+            hours, mins = map(int, time_24h.split(':'))
+            if hours == 0:
+                return f"12:{mins:02d} AM"
+            elif hours < 12:
+                return f"{hours}:{mins:02d} AM"
+            elif hours == 12:
+                return f"12:{mins:02d} PM"
+            else:
+                return f"{hours-12}:{mins:02d} PM"
+        
+        leave_by_display = to_12_hour_format(leave_time_24h)
+        arrive_by_display = to_12_hour_format(arrive_time_24h)
+        
+        return LeaveTimeResponse(
+            leave_by=leave_time_24h,
+            leave_by_display=leave_by_display,
+            drive_minutes=int(drive_minutes),
+            security_minutes=security_minutes,
+            buffer_minutes=buffer_minutes,
+            arrive_by_display=arrive_by_display,
+            airport=f"{AIRPORT_NAMES.get(request.airport_code, request.airport_code)} ({request.airport_code})"
+        )
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.error(f"Unexpected error in leave time calculation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
