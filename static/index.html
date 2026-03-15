@@ -124,6 +124,36 @@
             50% { opacity: 0.7; transform: scale(1.2); }
         }
 
+        .search-container {
+            max-width: 500px;
+            margin: 2rem auto;
+            animation: fade-in-up 0.8s ease-out 0.2s both;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 1rem 1.5rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.1);
+            transform: translateY(-1px);
+        }
+
         .airports-grid {
             display: grid;
             gap: 2rem;
@@ -379,6 +409,10 @@
             </div>
         </header>
 
+        <div class="search-container">
+            <input type="text" class="search-input" id="airport-search" placeholder="Search airports...">
+        </div>
+
         <main id="airports-container">
             <!-- Content will be populated by JavaScript -->
         </main>
@@ -453,6 +487,24 @@
             }
         }
 
+        // Search functionality
+        function setupSearch() {
+            const searchInput = document.getElementById('airport-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', function () {
+                    const term = this.value.trim().toLowerCase();
+                    const airportCards = document.querySelectorAll('.airport-card');
+                    
+                    airportCards.forEach(card => {
+                        const code = card.dataset.code || '';
+                        const name = card.dataset.name || '';
+                        const match = !term || code.includes(term) || name.includes(term);
+                        card.style.display = match ? '' : 'none';
+                    });
+                });
+            }
+        }
+
         async function loadData() {
             try {
                 const response = await fetch('/api/current');
@@ -485,6 +537,7 @@
                 });
                 
                 renderAirports(Object.values(grouped));
+                setupSearch();
                 
             } catch (error) {
                 console.error('Error loading data:', error);
@@ -517,10 +570,12 @@
             
             container.innerHTML = `
                 <div class="airports-grid">
-                    ${Object.entries(airportGroups).map(([airport, terminals]) => `
-                        <div class="airport-card">
+                    ${Object.entries(airportGroups).map(([airport, terminals]) => {
+                        const airportName = terminals[0]?.airport_name || airport;
+                        return `
+                        <div class="airport-card" data-code="${airport.toLowerCase()}" data-name="${airportName.toLowerCase()}">
                             <div class="airport-header">
-                                <h2 class="airport-name">${airport}</h2>
+                                <h2 class="airport-name">${airportName} (${airport})</h2>
                                 <div class="last-updated">
                                     ${formatLastUpdated(terminals[0]?.last_updated)}
                                 </div>
@@ -545,7 +600,8 @@
                                 <div>TSA PreCheck</div>
                             </div>
                         </div>
-                    `).join('')}
+                        `;
+                    }).join('')}
                 </div>
             `;
         }

@@ -43,6 +43,32 @@ PA_HEADERS = {
 BROWSERLESS_URL = os.getenv("BROWSERLESS_URL", "http://localhost:3100")
 BROWSERLESS_TOKEN = os.getenv("BROWSERLESS_TOKEN", "poseidon-scraper-token")
 
+# Airports supported by Port Authority API
+AIRPORTS = ["EWR", "JFK", "LGA", "BOS", "PHL", "PIT", "CLT", "MIA", "MCO", "DEN", "ORD", "MDW", "LAX", "SFO", "SEA", "DFW", "IAH", "IAD", "DCA", "BWI"]
+
+AIRPORT_NAMES = {
+    "EWR": "Newark Liberty",
+    "JFK": "JFK International",
+    "LGA": "LaGuardia",
+    "BOS": "Boston Logan",
+    "PHL": "Philadelphia",
+    "PIT": "Pittsburgh",
+    "CLT": "Charlotte Douglas",
+    "MIA": "Miami International",
+    "MCO": "Orlando International",
+    "DEN": "Denver International",
+    "ORD": "O'Hare International",
+    "MDW": "Chicago Midway",
+    "LAX": "Los Angeles International",
+    "SFO": "San Francisco International",
+    "SEA": "Seattle-Tacoma",
+    "DFW": "Dallas/Fort Worth",
+    "IAH": "Houston Bush",
+    "IAD": "Washington Dulles",
+    "DCA": "Reagan National",
+    "BWI": "Baltimore/Washington",
+}
+
 scheduler = AsyncIOScheduler()
 
 
@@ -197,12 +223,8 @@ async def scrape_atl():
 
 async def run_scraper():
     logger.info("Starting scraper run")
-    await asyncio.gather(
-        scrape_port_authority("EWR"),
-        scrape_port_authority("JFK"),
-        scrape_port_authority("LGA"),
-        scrape_atl(),
-    )
+    port_authority_tasks = [scrape_port_authority(airport) for airport in AIRPORTS]
+    await asyncio.gather(*port_authority_tasks, scrape_atl())
     logger.info("Scraper run completed")
 
 
@@ -226,6 +248,7 @@ async def get_current_wait_times() -> List[Dict[str, Any]]:
     return [
         {
             "airport": row[0],
+            "airport_name": AIRPORT_NAMES.get(row[0], row[0]),
             "terminal": row[1], 
             "lane": row[2],
             "wait_minutes": row[3],
